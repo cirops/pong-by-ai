@@ -1,0 +1,251 @@
+:root {
+  --bg: #0f1226;
+  --panel: #171a33;
+  --text: #e9ecff;
+  --accent: #6c8cff;
+  --accent-2: #73e0a9;
+  --muted: #9aa3c7;
+  --persona-easy: #4da3ff; /* blue */
+  --persona-medium: #a06cff; /* purple */
+  --persona-hard: #ff5c6b; /* red */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell,
+    Noto Sans, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+  color: var(--text);
+  background: radial-gradient(
+      1200px 800px at 10% -10%,
+      #1b1e3f,
+      transparent 60%
+    ),
+    radial-gradient(1000px 700px at 110% 10%, #10233a, transparent 60%),
+    var(--bg);
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.app-header,
+.app-footer {
+  padding: 16px 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0)
+  );
+}
+
+.app-header h1 {
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.app-main {
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  position: relative;
+  padding-top: 72px; /* reserve space for taunt bar overlay */
+}
+
+.taunt-bar {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  width: min(960px, calc(100% - 40px));
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 12px;
+  padding: 10px 12px;
+  height: 44px; /* fixed to avoid layout shifts */
+  display: flex;
+  align-items: center;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
+  border-left: 4px solid transparent;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.taunt-bar.hide {
+  opacity: 0;
+}
+
+.taunt-bar.show {
+  animation: tauntPop 200ms ease-out;
+}
+
+@keyframes tauntPop {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+/* Persona coloring */
+.taunt-bar.persona-easy {
+  border-left-color: var(--persona-easy);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--persona-easy) 20%, transparent),
+    color-mix(in oklab, var(--persona-easy) 6%, transparent)
+  );
+}
+
+.taunt-bar.persona-medium {
+  border-left-color: var(--persona-medium);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--persona-medium) 20%, transparent),
+    color-mix(in oklab, var(--persona-medium) 6%, transparent)
+  );
+}
+
+.taunt-bar.persona-hard {
+  border-left-color: var(--persona-hard);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--persona-hard) 20%, transparent),
+    color-mix(in oklab, var(--persona-hard) 6%, transparent)
+  );
+}
+
+.game-wrapper {
+  width: min(100%, 960px, calc((100dvh - 280px) * 16 / 9));
+  max-width: 960px;
+  background: var(--panel);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.canvas-area {
+  position: relative;
+}
+
+.scoreboard {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  font-size: 28px;
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.scoreboard .divider {
+  color: var(--muted);
+}
+
+canvas#game {
+  width: 100%;
+  height: auto;
+  display: block;
+  border-radius: 12px;
+  background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.02),
+      rgba(255, 255, 255, 0)
+    ),
+    #0b0e22;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  touch-action: none;
+}
+
+.controls {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: transform 0.08s ease, background 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.btn:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn.primary {
+  border-color: rgba(108, 140, 255, 0.5);
+  background: linear-gradient(
+    180deg,
+    rgba(108, 140, 255, 0.25),
+    rgba(108, 140, 255, 0.1)
+  );
+}
+
+.difficulty {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.difficulty .label {
+  color: var(--muted);
+  font-size: 13px;
+  margin-right: 2px;
+}
+
+.difficulty label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.hint {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.app-footer {
+  color: var(--muted);
+  font-size: 14px;
+}

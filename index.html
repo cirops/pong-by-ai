@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pong</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>Pong</h1>
+    </header>
+
+    <main class="app-main">
+      <div
+        id="tauntBar"
+        class="taunt-bar"
+        aria-live="polite"
+        aria-atomic="true"
+      ></div>
+      <div class="game-wrapper">
+        <div class="scoreboard" aria-live="polite">
+          <span id="playerScore">0</span>
+          <span class="divider">:</span>
+          <span id="aiScore">0</span>
+        </div>
+
+        <div class="canvas-area">
+          <canvas
+            id="game"
+            width="800"
+            height="450"
+            aria-label="Pong game canvas"
+          ></canvas>
+          <p class="hint">
+            Use W/S or Arrow Keys. Drag/touch to move the paddle.
+          </p>
+        </div>
+
+        <div class="controls">
+          <div
+            class="difficulty"
+            role="radiogroup"
+            aria-label="Select difficulty"
+          >
+            <span class="label">Difficulty:</span>
+            <label>
+              <input type="radio" name="difficulty" value="easy" />
+              Easy
+            </label>
+            <label>
+              <input type="radio" name="difficulty" value="medium" checked />
+              Medium
+            </label>
+            <label>
+              <input type="radio" name="difficulty" value="hard" />
+              Hard
+            </label>
+          </div>
+          <button id="startBtn" class="btn primary">Start</button>
+          <button id="pauseBtn" class="btn">Pause</button>
+          <button id="resetBtn" class="btn">Reset</button>
+        </div>
+      </div>
+    </main>
+
+    <footer class="app-footer">
+      <span>Built with vanilla JS</span>
+    </footer>
+
+    <script src="./main.js"></script>
+  </body>
+</html>
