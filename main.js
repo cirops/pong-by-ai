@@ -55,10 +55,16 @@
     // speeds are configured per difficulty
   };
 
-  let player = { x: 24, y: GAME_HEIGHT / 2 - paddle.height / 2, score: 0 };
+  let player = {
+    x: 24,
+    y: GAME_HEIGHT / 2 - paddle.height / 2,
+    vy: 0,
+    score: 0,
+  };
   let ai = {
     x: GAME_WIDTH - 24 - paddle.width,
     y: GAME_HEIGHT / 2 - paddle.height / 2,
+    vy: 0,
     score: 0,
   };
   let ball = {
@@ -735,6 +741,8 @@
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
   }
+  const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60° max deflection
+  const PADDLE_SPIN = 0.16; // coupling of paddle vertical motion into ball spin/angle
 
   function updatePlayer(dt) {
     let dy = 0;
@@ -746,9 +754,10 @@
       const diff = targetY - player.y;
       dy = clamp(diff, -paddle.speed * dt * 1.2, paddle.speed * dt * 1.2);
     }
-
+    const oldY = player.y;
     player.y += dy;
     player.y = clamp(player.y, 0, GAME_HEIGHT - paddle.height);
+    player.vy = (player.y - oldY) / Math.max(1e-6, dt);
   }
 
   function updateAI(dt) {
@@ -764,7 +773,9 @@
     if (isHard || ball.vx > 0 || Math.abs(diff) > paddle.height * 0.25) {
       ai.y += step;
     }
+    const oldY = ai.y;
     ai.y = clamp(ai.y, 0, GAME_HEIGHT - paddle.height);
+    ai.vy = (ai.y - oldY) / Math.max(1e-6, dt);
   }
 
   function resetPositions() {
@@ -873,10 +884,15 @@
       currentRallyHits += 1;
       const hitPos =
         (ball.y - (player.y + paddle.height / 2)) / (paddle.height / 2);
-      const angle = hitPos * (Math.PI / 3); // up to 60°
+      const baseAngle = hitPos * MAX_BOUNCE_ANGLE;
       ball.speed = clamp(ball.speed * 1.05, ballStartSpeed, ballMaxSpeed);
-      ball.vx = Math.cos(angle) * ball.speed;
-      ball.vy = Math.sin(angle) * ball.speed;
+      let nextVx = Math.cos(baseAngle) * ball.speed;
+      let nextVy = Math.sin(baseAngle) * ball.speed;
+      nextVy += player.vy * PADDLE_SPIN;
+      const rawAngle = Math.atan2(nextVy, Math.abs(nextVx));
+      const clampedAngle = clamp(rawAngle, -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
+      ball.vx = Math.cos(clampedAngle) * ball.speed;
+      ball.vy = Math.sin(clampedAngle) * ball.speed;
       ball.x = player.x + paddle.width + ballDefaults.size / 2 + 0.5;
       {
         const strength =
@@ -924,10 +940,15 @@
       currentRallyHits += 1;
       const hitPos =
         (ball.y - (ai.y + paddle.height / 2)) / (paddle.height / 2);
-      const angle = hitPos * (Math.PI / 3);
+      const baseAngle = hitPos * MAX_BOUNCE_ANGLE;
       ball.speed = clamp(ball.speed * 1.05, ballStartSpeed, ballMaxSpeed);
-      ball.vx = -Math.cos(angle) * ball.speed;
-      ball.vy = Math.sin(angle) * ball.speed;
+      let nextVx = Math.cos(baseAngle) * ball.speed;
+      let nextVy = Math.sin(baseAngle) * ball.speed;
+      nextVy += ai.vy * PADDLE_SPIN;
+      const rawAngle = Math.atan2(nextVy, Math.abs(nextVx));
+      const clampedAngle = clamp(rawAngle, -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
+      ball.vx = -Math.cos(clampedAngle) * ball.speed;
+      ball.vy = Math.sin(clampedAngle) * ball.speed;
       ball.x = ai.x - ballDefaults.size / 2 - 0.5;
       {
         const strength =
