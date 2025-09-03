@@ -8,7 +8,7 @@
 
 ## 2. Game feel and readability (must-have)
 
-- [ ] Layered feedback: SFX for hits/walls/score; subtle screen shake on high-impact hits; hit sparks and trails
+- [x] Layered feedback: SFX for hits/walls/score; subtle screen shake on high-impact hits; hit sparks and trails
 - [ ] Ball/paddle response: contact-point-driven angles with optional spin; enforce speed cap with gradual ramp-up
 - [ ] Readability first: high-contrast ball, motion trails tuned for 60fps, colorblind-safe palette
 

@@ -359,6 +359,206 @@
     }
   }
 
+  // --- Layered feedback: Audio SFX ---
+  let audioCtx = null;
+  let masterGain = null;
+  function ensureAudio() {
+    if (!audioCtx) {
+      const Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return;
+      audioCtx = new Ctx();
+      masterGain = audioCtx.createGain();
+      masterGain.gain.value = 0.4;
+      masterGain.connect(audioCtx.destination);
+    }
+    if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+  }
+
+  function playTone({
+    frequency = 440,
+    duration = 0.08,
+    type = "sine",
+    gain = 0.25,
+    attack = 0.005,
+    decay = 0.06,
+    detune = 0,
+  } = {}) {
+    if (!audioCtx || !masterGain) return;
+    const osc = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.value = frequency;
+    osc.detune.value = detune;
+    osc.connect(g);
+    g.connect(masterGain);
+    const now = audioCtx.currentTime;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.linearRampToValueAtTime(gain, now + attack);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + attack + decay);
+    osc.start(now);
+    osc.stop(now + duration);
+  }
+
+  function playNoise({
+    duration = 0.04,
+    gain = 0.22,
+    freq = 1400,
+    q = 6,
+  } = {}) {
+    if (!audioCtx || !masterGain) return;
+    const frames = Math.max(1, Math.floor(audioCtx.sampleRate * duration));
+    const buffer = audioCtx.createBuffer(1, frames, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < frames; i++) data[i] = Math.random() * 2 - 1;
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = freq;
+    filter.Q.value = q;
+    const g = audioCtx.createGain();
+    g.gain.value = gain;
+    src.connect(filter);
+    filter.connect(g);
+    g.connect(masterGain);
+    src.start();
+    src.stop(audioCtx.currentTime + duration);
+  }
+
+  function sfxPaddle(strength = 0.5) {
+    ensureAudio();
+    if (!audioCtx) return;
+    const base = 280 + strength * 220;
+    playTone({
+      frequency: base,
+      duration: 0.07,
+      type: "square",
+      gain: 0.18 + strength * 0.18,
+    });
+    playTone({
+      frequency: base * 2,
+      duration: 0.05,
+      type: "sine",
+      gain: 0.08 + strength * 0.1,
+      detune: 6,
+    });
+  }
+
+  function sfxWall(strength = 0.4) {
+    ensureAudio();
+    if (!audioCtx) return;
+    playNoise({
+      duration: 0.03 + strength * 0.02,
+      gain: 0.12 + strength * 0.12,
+      freq: 1200 + strength * 1200,
+      q: 7,
+    });
+  }
+
+  function sfxScore(win) {
+    ensureAudio();
+    if (!audioCtx) return;
+    const base = win ? 440 : 300;
+    playTone({ frequency: base, duration: 0.12, type: "triangle", gain: 0.25 });
+    setTimeout(() => {
+      playTone({
+        frequency: win ? base * 1.26 : base * 0.84,
+        duration: 0.14,
+        type: "triangle",
+        gain: 0.22,
+      });
+    }, 24);
+  }
+
+  // --- Layered feedback: Screen shake ---
+  let shakeEndAt = 0;
+  let shakeDurationMs = 0;
+  let shakeIntensityPx = 0;
+  function addScreenShake(intensityPx, durationMs) {
+    const now = performance.now();
+    const end = now + durationMs;
+    shakeEndAt = Math.max(shakeEndAt, end);
+    shakeDurationMs = Math.max(shakeDurationMs, durationMs);
+    shakeIntensityPx = Math.max(shakeIntensityPx, intensityPx);
+  }
+  function getShakeOffset() {
+    const now = performance.now();
+    if (now >= shakeEndAt || shakeDurationMs <= 0 || shakeIntensityPx <= 0)
+      return [0, 0];
+    const t = (shakeEndAt - now) / shakeDurationMs;
+    const amp = shakeIntensityPx * t * t; // ease-out
+    const ox = (Math.random() * 2 - 1) * amp;
+    const oy = (Math.random() * 2 - 1) * amp;
+    if (t <= 0) {
+      shakeDurationMs = 0;
+      shakeIntensityPx = 0;
+    }
+    return [ox, oy];
+  }
+
+  // --- Layered feedback: Particles (hit sparks) ---
+  const particles = [];
+  function spawnSparks(x, y, normalX, normalY, strength = 0.6) {
+    const count = Math.round(8 + strength * 6);
+    const baseAngle = Math.atan2(normalY, normalX);
+    for (let i = 0; i < count; i++) {
+      const spread = (Math.random() - 0.5) * (Math.PI / 2);
+      const angle = baseAngle + spread;
+      const speed = 180 + Math.random() * 220 * strength;
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+      const life = 0.25 + Math.random() * 0.25;
+      const size = 2 + Math.random() * 2;
+      particles.push({ x, y, vx, vy, life, ttl: life, size });
+    }
+  }
+  function updateEffects(dt) {
+    for (let i = particles.length - 1; i >= 0; i--) {
+      const p = particles[i];
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.98;
+      p.vy *= 0.98;
+      p.life -= dt;
+      if (p.life <= 0) particles.splice(i, 1);
+    }
+  }
+  function drawParticles() {
+    ctx.save();
+    for (const p of particles) {
+      const alpha = Math.max(0, p.life / p.ttl);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = "#ffd166";
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+    }
+    ctx.restore();
+  }
+
+  // --- Layered feedback: Ball trail ---
+  const MAX_TRAIL_POINTS = 14;
+  const ballTrail = [];
+  function addTrailPoint() {
+    ballTrail.push({ x: ball.x, y: ball.y });
+    if (ballTrail.length > MAX_TRAIL_POINTS) ballTrail.shift();
+  }
+  function clearTrail() {
+    ballTrail.length = 0;
+  }
+  function drawBallTrail() {
+    if (ballTrail.length === 0) return;
+    ctx.save();
+    const r = ballDefaults.size / 2;
+    for (let i = 0; i < ballTrail.length; i++) {
+      const t = i / ballTrail.length;
+      const alpha = t * 0.5; // older points are fainter
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(ballTrail[i].x, ballTrail[i].y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // Input handling
   const input = {
     up: false,
@@ -395,6 +595,7 @@
 
     ball.vx = Math.cos(angle) * ball.speed * direction;
     ball.vy = Math.sin(angle) * ball.speed;
+    clearTrail();
   }
 
   const State = {
@@ -443,9 +644,15 @@
 
   function draw() {
     // Background
+    const [sx, sy] = getShakeOffset();
+    ctx.save();
+    ctx.translate(sx, sy);
     drawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, "#0b0e22");
 
     drawNet();
+
+    // Motion trail (under objects)
+    drawBallTrail();
 
     // Paddles
     drawRect(player.x, player.y, paddle.width, paddle.height, "#73e0a9");
@@ -463,6 +670,11 @@
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, ballDefaults.size / 2, 0, Math.PI * 2);
     ctx.fill();
+
+    // Particles (over ball)
+    drawParticles();
+
+    ctx.restore();
 
     // If not playing, overlay UI for menu/pause/countdown/match over
     if (state !== State.PLAYING) {
@@ -606,12 +818,16 @@
       resetPositions();
       ball.vx = 0;
       ball.vy = 0;
+      sfxScore(matchWinner === "player");
+      addScreenShake(8, 260);
       return;
     }
 
     // Next point: alternate server and start countdown
     server = scorer === "player" ? "ai" : "player";
     resetPositions();
+    sfxScore(scorer === "player");
+    addScreenShake(6, 220);
     startCountdown(server === "player" ? 1 : -1);
   }
 
@@ -628,10 +844,16 @@
     if (ball.y - ballDefaults.size / 2 <= 0) {
       ball.y = ballDefaults.size / 2;
       ball.vy = Math.abs(ball.vy);
+      sfxWall(Math.min(1, Math.abs(ball.vy) / ballMaxSpeed));
+      spawnSparks(ball.x, ball.y, 0, 1, 0.6);
+      addScreenShake(2.5, 120);
     }
     if (ball.y + ballDefaults.size / 2 >= GAME_HEIGHT) {
       ball.y = GAME_HEIGHT - ballDefaults.size / 2;
       ball.vy = -Math.abs(ball.vy);
+      sfxWall(Math.min(1, Math.abs(ball.vy) / ballMaxSpeed));
+      spawnSparks(ball.x, ball.y, 0, -1, 0.6);
+      addScreenShake(2.5, 120);
     }
 
     // Paddle collisions
@@ -656,6 +878,19 @@
       ball.vx = Math.cos(angle) * ball.speed;
       ball.vy = Math.sin(angle) * ball.speed;
       ball.x = player.x + paddle.width + ballDefaults.size / 2 + 0.5;
+      {
+        const strength =
+          clamp(
+            (ball.speed - ballStartSpeed) /
+              (ballMaxSpeed - ballStartSpeed + 1e-6),
+            0,
+            1
+          ) *
+          (0.6 + 0.4 * Math.min(1, Math.abs(hitPos)));
+        sfxPaddle(strength);
+        spawnSparks(left, ball.y, -1, 0, 0.6 + strength * 0.6);
+        if (ball.speed > ballStartSpeed * 1.2) addScreenShake(4, 140);
+      }
       maybeTaunt(
         "playerHit",
         currentDifficulty === "easy"
@@ -694,6 +929,19 @@
       ball.vx = -Math.cos(angle) * ball.speed;
       ball.vy = Math.sin(angle) * ball.speed;
       ball.x = ai.x - ballDefaults.size / 2 - 0.5;
+      {
+        const strength =
+          clamp(
+            (ball.speed - ballStartSpeed) /
+              (ballMaxSpeed - ballStartSpeed + 1e-6),
+            0,
+            1
+          ) *
+          (0.6 + 0.4 * Math.min(1, Math.abs(hitPos)));
+        sfxPaddle(strength);
+        spawnSparks(right, ball.y, 1, 0, 0.6 + strength * 0.6);
+        if (ball.speed > ballStartSpeed * 1.2) addScreenShake(4, 140);
+      }
       maybeTaunt(
         "aiHit",
         currentDifficulty === "easy"
@@ -722,6 +970,8 @@
     if (ball.x > GAME_WIDTH + ballDefaults.size) {
       onScore("player");
     }
+
+    addTrailPoint();
   }
 
   let lastTime = 0;
@@ -739,6 +989,7 @@
       updatePlayer(dt);
       updateAI(dt);
       updateBall(dt);
+      updateEffects(dt);
       // Occasional random taunts while playing
       if (
         randomChance(
@@ -827,6 +1078,7 @@
   }
 
   startBtn.addEventListener("click", () => {
+    ensureAudio();
     if (state === State.MENU || state === State.MATCH_OVER) {
       startMatch();
     } else if (state === State.PAUSED) {
@@ -887,6 +1139,7 @@
   }
 
   canvas.addEventListener("pointerdown", (e) => {
+    ensureAudio();
     input.pointerActive = true;
     input.pointerY = canvasToGameY(e.clientY);
   });
