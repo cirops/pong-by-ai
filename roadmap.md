@@ -16,7 +16,9 @@
 
 - [x] Calibrated AI: human-like misses, tiered reaction delays; avoids “perfect tracking”
 - [x] Adaptive difficulty: adjust AI after each set based on margin of victory
-- [ ] Modes: Arcade (ramping AI), Time Attack (score within time), Practice (ball launcher)
+- [x] Modes: Classic: The default game mode, choose the difficulty and play
+- [x] Target Practice: enemy paddle becomes a fixed target on every bounce, hitting will spawn another one and the score will go up
+- [ ] Arcade: The arcade mode, 3 wins per tier → next tier; subtier ramp, game over screen with stats
 
 ## 4. UX and structure
 

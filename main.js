@@ -12,6 +12,9 @@
   const difficultyRadios = Array.from(
     document.querySelectorAll('input[name="difficulty"]')
   );
+  const modeRadios = Array.from(
+    document.querySelectorAll('input[name="mode"]')
+  );
   const tauntBar = document.getElementById("tauntBar");
 
   // Colorblind-safe palette (Okabe-Ito inspired)
@@ -461,6 +464,8 @@
   function maybeTaunt(category, probability, { bypassCooldown = false } = {}) {
     const now = Date.now();
     const jitter = Math.random() * 1200 - 600; // +/- 600ms jitter
+    // Suppress taunts in Target mode
+    if (currentMode === Mode.TARGET) return;
     if (!bypassCooldown && now - lastTauntTime < tauntCooldownMs + jitter)
       return;
     const persona = TAUNTS[currentDifficulty] || TAUNTS.medium;
@@ -727,6 +732,10 @@
   };
   let state = State.MENU;
 
+  // Modes
+  const Mode = { CLASSIC: "classic", TARGET: "target" };
+  let currentMode = Mode.CLASSIC;
+
   // Match configuration and state
   const POINTS_TO_WIN = 7;
   let server = "player"; // alternates each point; set at match start
@@ -736,12 +745,70 @@
   let countdownEndAt = 0; // performance.now() timestamp when countdown ends
   let nextServeDirection = 1; // +1 means ball goes to AI (right), -1 goes to player (left)
 
+  // Target mode timer state
+  const TARGET_TIME_LIMIT_MS = 60000; // 60 seconds
+  let targetModeEndsAt = 0; // timestamp when target mode run ends
+  let targetModeActive = false; // true while the timer is running
+
   // Simple stats
   let currentRallyHits = 0;
   let longestRally = 0;
   let totalRallies = 0;
   let playerAces = 0;
   let aiAces = 0;
+
+  // Target Practice elements
+  const targetDefaults = { width: 26, height: 26 };
+  let target = {
+    x: 0,
+    y: 0,
+    w: targetDefaults.width,
+    h: targetDefaults.height,
+    active: false,
+  };
+  // When true, a new target will spawn after current physics step
+  let pendingTargetSpawn = false;
+  function clearTarget() {
+    target.active = false;
+  }
+  function targetSizeForDifficulty() {
+    // Slightly larger targets across all difficulties
+    if (currentDifficulty === "easy") return { w: 44, h: 44 };
+    if (currentDifficulty === "medium") return { w: 36, h: 36 };
+    return { w: 30, h: 30 };
+  }
+  function spawnTarget() {
+    const size = targetSizeForDifficulty();
+    target.w = size.w;
+    target.h = size.h;
+    target.x = GAME_WIDTH - 24 - paddle.width - target.w - 6;
+    const minY = 8;
+    const maxY = GAME_HEIGHT - target.h - 8;
+    target.y = Math.max(
+      minY,
+      Math.min(maxY, Math.random() * (maxY - minY) + minY)
+    );
+    target.active = true;
+  }
+  function ensureTarget() {
+    if (!target.active) spawnTarget();
+  }
+  function drawTarget() {
+    // Draw as a square target with an outline for visibility
+    ctx.save();
+    const targetColor =
+      currentDifficulty === "easy"
+        ? PALETTE.aiEasy
+        : currentDifficulty === "medium"
+        ? PALETTE.aiMedium
+        : PALETTE.aiHard;
+    ctx.fillStyle = targetColor;
+    ctx.fillRect(target.x, target.y, target.w, target.h);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = darkenHexToRgbString(targetColor, 0.3);
+    ctx.strokeRect(target.x + 1, target.y + 1, target.w - 2, target.h - 2);
+    ctx.restore();
+  }
 
   // Rendering helpers
   function drawRect(x, y, w, h, color) {
@@ -782,14 +849,18 @@
       paddle.height,
       PALETTE.playerPaddle
     );
-    // AI paddle color depends on persona/difficulty
-    const aiColor =
-      currentDifficulty === "easy"
-        ? PALETTE.aiEasy
-        : currentDifficulty === "medium"
-        ? PALETTE.aiMedium
-        : PALETTE.aiHard;
-    drawRect(ai.x, ai.y, paddle.width, paddle.height, aiColor);
+    // AI paddle or Target (depending on mode)
+    if (currentMode === Mode.CLASSIC) {
+      const aiColor =
+        currentDifficulty === "easy"
+          ? PALETTE.aiEasy
+          : currentDifficulty === "medium"
+          ? PALETTE.aiMedium
+          : PALETTE.aiHard;
+      drawRect(ai.x, ai.y, paddle.width, paddle.height, aiColor);
+    } else if (currentMode === Mode.TARGET && target.active) {
+      drawTarget();
+    }
 
     // Ball (circle)
     ctx.fillStyle = PALETTE.ballFill;
@@ -804,6 +875,25 @@
     drawParticles();
 
     ctx.restore();
+
+    // HUD overlays
+    // Timer HUD for Target mode while playing
+    if (
+      state === State.PLAYING &&
+      currentMode === Mode.TARGET &&
+      targetModeActive
+    ) {
+      const now = performance.now();
+      const remainMs = Math.max(0, targetModeEndsAt - now);
+      const seconds = Math.ceil(remainMs / 1000);
+      ctx.save();
+      ctx.fillStyle = "rgba(233,236,255,0.95)";
+      ctx.textAlign = "left";
+      ctx.font =
+        "20px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
+      ctx.fillText(`Time: ${seconds}s`, 16, 28);
+      ctx.restore();
+    }
 
     // If not playing, overlay UI for menu/pause/countdown/match over
     if (state !== State.PLAYING) {
@@ -836,20 +926,33 @@
           nextServeDirection === 1 ? "Player serves" : "AI serves";
         ctx.fillText(servingWho, centerX, centerY + 36);
       } else if (state === State.MATCH_OVER) {
-        const winnerText = matchWinner === "player" ? "You Win!" : "AI Wins!";
+        const winnerText =
+          currentMode === Mode.TARGET
+            ? "Time Up!"
+            : matchWinner === "player"
+            ? "You Win!"
+            : "AI Wins!";
         ctx.font =
           "36px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
         ctx.fillText(winnerText, centerX, centerY - 40);
 
         ctx.font =
           "16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
-        const lines = [
-          `Final Score: ${player.score} : ${ai.score}`,
-          `Longest rally: ${longestRally}`,
-          `Aces — You: ${playerAces}  AI: ${aiAces}`,
-          `Rallies: ${totalRallies}`,
-          `Press Start for Rematch or Reset to return to Menu`,
-        ];
+        const lines =
+          currentMode === Mode.TARGET
+            ? [
+                `Score: ${player.score}`,
+                `Targets hit: ${player.score}`,
+                `Best rally: ${longestRally}`,
+                `Press Start to retry or Reset to return`,
+              ]
+            : [
+                `Final Score: ${player.score} : ${ai.score}`,
+                `Longest rally: ${longestRally}`,
+                `Aces — You: ${playerAces}  AI: ${aiAces}`,
+                `Rallies: ${totalRallies}`,
+                `Press Start for Rematch or Reset to return to Menu`,
+              ];
         let y = centerY;
         for (const line of lines) {
           ctx.fillText(line, centerX, y);
@@ -882,6 +985,78 @@
   }
   const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60° max deflection
   const PADDLE_SPIN = 0.16; // coupling of paddle vertical motion into ball spin/angle
+
+  // Swept circle (ball) vs AABB (target) to prevent tunneling
+  function sweepCircleVsAABB(x0, y0, x1, y1, radius, rx, ry, rw, rh) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+
+    const minX = rx - radius;
+    const maxX = rx + rw + radius;
+    const minY = ry - radius;
+    const maxY = ry + rh + radius;
+
+    let tEnter = 0;
+    let tExit = 1;
+
+    // X slabs
+    if (dx !== 0) {
+      const invDx = 1 / dx;
+      let tNear = (minX - x0) * invDx;
+      let tFar = (maxX - x0) * invDx;
+      if (tNear > tFar) {
+        const tmp = tNear;
+        tNear = tFar;
+        tFar = tmp;
+      }
+      tEnter = Math.max(tEnter, tNear);
+      tExit = Math.min(tExit, tFar);
+      if (tEnter > tExit) return null;
+    } else if (x0 < minX || x0 > maxX) {
+      return null;
+    }
+
+    // Y slabs
+    if (dy !== 0) {
+      const invDy = 1 / dy;
+      let tNear = (minY - y0) * invDy;
+      let tFar = (maxY - y0) * invDy;
+      if (tNear > tFar) {
+        const tmp = tNear;
+        tNear = tFar;
+        tFar = tmp;
+      }
+      tEnter = Math.max(tEnter, tNear);
+      tExit = Math.min(tExit, tFar);
+      if (tEnter > tExit) return null;
+    } else if (y0 < minY || y0 > maxY) {
+      return null;
+    }
+
+    if (tEnter < 0 || tEnter > 1) return null;
+
+    const hitX = x0 + dx * tEnter;
+    const hitY = y0 + dy * tEnter;
+
+    // Determine normal by comparing entry times on axes
+    let nx = 0;
+    let ny = 0;
+    const tx1 = dx !== 0 ? (minX - x0) / dx : -Infinity;
+    const tx2 = dx !== 0 ? (maxX - x0) / dx : -Infinity;
+    const ty1 = dy !== 0 ? (minY - y0) / dy : -Infinity;
+    const ty2 = dy !== 0 ? (maxY - y0) / dy : -Infinity;
+    const txMin = Math.min(tx1, tx2);
+    const tyMin = Math.min(ty1, ty2);
+    if (txMin > tyMin) {
+      nx = dx > 0 ? -1 : 1;
+      ny = 0;
+    } else {
+      nx = 0;
+      ny = dy > 0 ? -1 : 1;
+    }
+
+    return { t: tEnter, x: hitX, y: hitY, nx, ny };
+  }
 
   function updatePlayer(dt) {
     let dy = 0;
@@ -1049,6 +1224,8 @@
   }
 
   function updateBall(dt) {
+    const prevX = ball.x;
+    const prevY = ball.y;
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
 
@@ -1128,72 +1305,149 @@
             : 0.12
         );
       }
+      // In Target mode, ensure a new target is present after each player bounce
+      if (currentMode === Mode.TARGET) ensureTarget();
     }
 
-    // AI paddle
-    if (
-      right >= ai.x &&
-      left <= ai.x + paddle.width &&
-      bottom >= ai.y &&
-      top <= ai.y + paddle.height &&
-      ball.vx > 0
-    ) {
-      currentRallyHits += 1;
-      const hitPos =
-        (ball.y - (ai.y + paddle.height / 2)) / (paddle.height / 2);
-      const baseAngle = hitPos * MAX_BOUNCE_ANGLE;
-      ball.speed = clamp(ball.speed * 1.05, ballStartSpeed, ballMaxSpeed);
-      let nextVx = Math.cos(baseAngle) * ball.speed;
-      let nextVy = Math.sin(baseAngle) * ball.speed;
-      nextVy += ai.vy * PADDLE_SPIN;
-      const rawAngle = Math.atan2(nextVy, Math.abs(nextVx));
-      const clampedAngle = clamp(rawAngle, -MAX_BOUNCE_ANGLE, MAX_BOUNCE_ANGLE);
-      ball.vx = -Math.cos(clampedAngle) * ball.speed;
-      ball.vy = Math.sin(clampedAngle) * ball.speed;
-      ball.x = ai.x - ballDefaults.size / 2 - 0.5;
-      {
-        const strength =
-          clamp(
-            (ball.speed - ballStartSpeed) /
-              (ballMaxSpeed - ballStartSpeed + 1e-6),
-            0,
-            1
-          ) *
-          (0.6 + 0.4 * Math.min(1, Math.abs(hitPos)));
-        sfxPaddle(strength);
-        spawnSparks(right, ball.y, 1, 0, 0.6 + strength * 0.6);
-        if (ball.speed > ballStartSpeed * 1.2) addScreenShake(4, 140);
-      }
-      maybeTaunt(
-        "aiHit",
-        currentDifficulty === "easy"
-          ? 0.22
-          : currentDifficulty === "medium"
-          ? 0.16
-          : 0.1
-      );
-
-      if (Math.abs(hitPos) > 0.6 && ball.speed > ballStartSpeed * 1.2) {
-        maybeTaunt(
-          "sharp",
-          currentDifficulty === "easy"
-            ? 0.28
-            : currentDifficulty === "medium"
-            ? 0.2
-            : 0.14
+    // AI paddle (Classic mode only)
+    if (currentMode === Mode.CLASSIC) {
+      if (
+        right >= ai.x &&
+        left <= ai.x + paddle.width &&
+        bottom >= ai.y &&
+        top <= ai.y + paddle.height &&
+        ball.vx > 0
+      ) {
+        currentRallyHits += 1;
+        const hitPos =
+          (ball.y - (ai.y + paddle.height / 2)) / (paddle.height / 2);
+        const baseAngle = hitPos * MAX_BOUNCE_ANGLE;
+        ball.speed = clamp(ball.speed * 1.05, ballStartSpeed, ballMaxSpeed);
+        let nextVx = Math.cos(baseAngle) * ball.speed;
+        let nextVy = Math.sin(baseAngle) * ball.speed;
+        nextVy += ai.vy * PADDLE_SPIN;
+        const rawAngle = Math.atan2(nextVy, Math.abs(nextVx));
+        const clampedAngle = clamp(
+          rawAngle,
+          -MAX_BOUNCE_ANGLE,
+          MAX_BOUNCE_ANGLE
         );
+        ball.vx = -Math.cos(clampedAngle) * ball.speed;
+        ball.vy = Math.sin(clampedAngle) * ball.speed;
+        ball.x = ai.x - ballDefaults.size / 2 - 0.5;
+        {
+          const strength =
+            clamp(
+              (ball.speed - ballStartSpeed) /
+                (ballMaxSpeed - ballStartSpeed + 1e-6),
+              0,
+              1
+            ) *
+            (0.6 + 0.4 * Math.min(1, Math.abs(hitPos)));
+          sfxPaddle(strength);
+          spawnSparks(right, ball.y, 1, 0, 0.6 + strength * 0.6);
+          if (ball.speed > ballStartSpeed * 1.2) addScreenShake(4, 140);
+        }
+        maybeTaunt(
+          "aiHit",
+          currentDifficulty === "easy"
+            ? 0.22
+            : currentDifficulty === "medium"
+            ? 0.16
+            : 0.1
+        );
+
+        if (Math.abs(hitPos) > 0.6 && ball.speed > ballStartSpeed * 1.2) {
+          maybeTaunt(
+            "sharp",
+            currentDifficulty === "easy"
+              ? 0.28
+              : currentDifficulty === "medium"
+              ? 0.2
+              : 0.14
+          );
+        }
       }
     }
 
-    // Scoring
-    if (ball.x < -ballDefaults.size) {
-      onScore("ai");
+    // Target collision (Target Practice mode, swept to prevent tunneling)
+    if (currentMode === Mode.TARGET && target.active) {
+      const r = ballDefaults.size / 2;
+      const hit = sweepCircleVsAABB(
+        prevX,
+        prevY,
+        ball.x,
+        ball.y,
+        r,
+        target.x,
+        target.y,
+        target.w,
+        target.h
+      );
+      if (hit) {
+        // Award score
+        player.score += 1;
+        updateScoreUI();
+
+        // Place ball at contact point and reflect velocity on the hit normal
+        const separation = ballDefaults.size / 2 + 0.5;
+        ball.x = hit.x + hit.nx * separation;
+        ball.y = hit.y + hit.ny * separation;
+        if (hit.nx !== 0) ball.vx = -ball.vx;
+        if (hit.ny !== 0) ball.vy = -ball.vy;
+        // Maintain speed ramp
+        const currentSpeed = Math.hypot(ball.vx, ball.vy);
+        const nextSpeed = clamp(
+          Math.max(currentSpeed, ball.speed) * 1.04,
+          ballStartSpeed,
+          ballMaxSpeed
+        );
+        const dir = Math.atan2(ball.vy, ball.vx);
+        ball.speed = nextSpeed;
+        ball.vx = Math.cos(dir) * nextSpeed;
+        ball.vy = Math.sin(dir) * nextSpeed;
+
+        sfxPaddle(0.8);
+        spawnSparks(ball.x, ball.y, hit.nx, hit.ny, 0.9);
+        addScreenShake(5, 160);
+        // Despawn immediately and schedule a respawn elsewhere after this step
+        clearTarget();
+        pendingTargetSpawn = true;
+      }
     }
-    if (ball.x > GAME_WIDTH + ballDefaults.size) {
-      onScore("player");
+
+    // Horizontal edges / scoring
+    if (currentMode === Mode.TARGET) {
+      // Reflect off side edges instead of scoring
+      if (left <= 0) {
+        ball.x = ballDefaults.size / 2;
+        ball.vx = Math.abs(ball.vx);
+        sfxWall(0.4);
+        spawnSparks(ball.x, ball.y, 1, 0, 0.5);
+        addScreenShake(2.5, 120);
+      }
+      if (right >= GAME_WIDTH) {
+        ball.x = GAME_WIDTH - ballDefaults.size / 2;
+        ball.vx = -Math.abs(ball.vx);
+        sfxWall(0.4);
+        spawnSparks(ball.x, ball.y, -1, 0, 0.5);
+        addScreenShake(2.5, 120);
+      }
+    } else {
+      // Classic scoring
+      if (ball.x < -ballDefaults.size) {
+        onScore("ai");
+      }
+      if (ball.x > GAME_WIDTH + ballDefaults.size) {
+        onScore("player");
+      }
     }
 
     addTrailPoint();
+    if (pendingTargetSpawn) {
+      spawnTarget();
+      pendingTargetSpawn = false;
+    }
   }
 
   let lastTime = 0;
@@ -1208,8 +1462,17 @@
         setState(State.PLAYING);
       }
     } else if (state === State.PLAYING) {
+      // End Target mode when timer expires
+      if (currentMode === Mode.TARGET && targetModeActive) {
+        if (performance.now() >= targetModeEndsAt) {
+          targetModeActive = false;
+          matchWinner = null;
+          state = State.MATCH_OVER;
+          startBtn.textContent = "Retry";
+        }
+      }
       updatePlayer(dt);
-      updateAI(dt);
+      if (currentMode === Mode.CLASSIC) updateAI(dt);
       updateBall(dt);
       updateEffects(dt);
       // Occasional random taunts while playing
@@ -1269,6 +1532,17 @@
     resetAIThinking();
   }
 
+  function applyMode(mode) {
+    currentMode = mode === "target" ? Mode.TARGET : Mode.CLASSIC;
+    clearTarget();
+    resetPositions();
+    resetAIThinking();
+    // Hide taunt bar in Target mode
+    if (tauntBar) {
+      tauntBar.style.display = currentMode === Mode.TARGET ? "none" : "";
+    }
+  }
+
   // Initialize difficulty from selected radio (default medium)
   const checked = difficultyRadios.find((r) => r.checked);
   if (checked) applyDifficulty(checked.value);
@@ -1276,6 +1550,16 @@
     radio.addEventListener("change", () => {
       if (state === State.PLAYING) return; // do not change mid-play
       applyDifficulty(radio.value);
+    });
+  });
+
+  // Initialize mode from selected radio (default classic)
+  const modeChecked = modeRadios.find((r) => r.checked);
+  if (modeChecked) applyMode(modeChecked.value);
+  modeRadios.forEach((radio) => {
+    radio.addEventListener("change", () => {
+      if (state === State.PLAYING) return; // do not change mid-play
+      applyMode(radio.value);
     });
   });
 
@@ -1296,11 +1580,24 @@
     aiAces = 0;
     currentRallyHits = 0;
     matchWinner = null;
-    // Randomize initial server and begin countdown
-    server = Math.random() < 0.5 ? "player" : "ai";
+    // Decide initial server and begin countdown (always player in Target mode)
+    server =
+      currentMode === Mode.TARGET
+        ? "player"
+        : Math.random() < 0.5
+        ? "player"
+        : "ai";
     resetPositions();
     resetAIThinking();
+    clearTarget();
     startBtn.textContent = "Start";
+    if (currentMode === Mode.TARGET) {
+      spawnTarget();
+      targetModeEndsAt = performance.now() + TARGET_TIME_LIMIT_MS;
+      targetModeActive = true;
+    } else {
+      targetModeActive = false;
+    }
     startCountdown(server === "player" ? 1 : -1);
   }
 
