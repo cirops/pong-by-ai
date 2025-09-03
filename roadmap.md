@@ -10,17 +10,17 @@
 
 - [x] Layered feedback: SFX for hits/walls/score; subtle screen shake on high-impact hits; hit sparks and trails
 - [x] Ball/paddle response: contact-point-driven angles with optional spin; enforce speed cap with gradual ramp-up
-- [ ] Readability first: high-contrast ball, motion trails tuned for 60fps, colorblind-safe palette
+- [x] Readability first: high-contrast ball, motion trails tuned for 60fps, colorblind-safe palette
 
-## 3. Inputs and accessibility (must-have)
+<!-- ## 3. Inputs and accessibility (must-have)
 
 - [ ] Rebindable inputs; controller support; touch controls on mobile with assist aim
 - [ ] Input buffering to mask latency; frame-rate-independent paddle speed
-- [ ] Accessibility options: colorblind presets, reduced-motion toggle, adjustable difficulty
+- [ ] Accessibility options: colorblind presets, reduced-motion toggle, adjustable difficulty -->
 
-## 4. Difficulty and progression
+## 3. Difficulty and progression
 
-- [ ] Calibrated AI: human-like misses, tiered reaction delays; avoids “perfect tracking”
+- [x] Calibrated AI: human-like misses, tiered reaction delays; avoids “perfect tracking”
 - [ ] Adaptive difficulty: adjust AI after each set based on margin of victory
 - [ ] Modes: Arcade (ramping AI), Time Attack (score within time), Practice (ball launcher)
 

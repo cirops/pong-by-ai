@@ -14,6 +14,73 @@
   );
   const tauntBar = document.getElementById("tauntBar");
 
+  // Colorblind-safe palette (Okabe-Ito inspired)
+  const PALETTE = {
+    background: "#0b0e22",
+    net: "#C8CCD9",
+    ballFill: "#FFFFFF",
+    ballStroke: "rgba(0,0,0,0.9)",
+    playerPaddle: "#009E73", // bluish green
+    aiEasy: "#E69F00", // orange
+    aiMedium: "#0072B2", // blue
+    aiHard: "#D55E00", // vermillion
+  };
+
+  function hexToRgb(hex) {
+    const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    if (!m) return { r: 255, g: 255, b: 255 };
+    return {
+      r: parseInt(m[1], 16),
+      g: parseInt(m[2], 16),
+      b: parseInt(m[3], 16),
+    };
+  }
+
+  function pickReadableTextColor(bgHex) {
+    const { r, g, b } = hexToRgb(bgHex);
+    const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+    return yiq >= 186 ? "#0b0e22" : "#ffffff";
+  }
+
+  function rgbaFromHex(hex, alpha) {
+    const { r, g, b } = hexToRgb(hex);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function darkenHexToRgbString(hex, percent = 0.15) {
+    const { r, g, b } = hexToRgb(hex);
+    const k = Math.max(0, Math.min(1, 1 - percent));
+    const dr = Math.round(r * k);
+    const dg = Math.round(g * k);
+    const db = Math.round(b * k);
+    return `rgb(${dr},${dg},${db})`;
+  }
+
+  function setTauntBarPersonaColor(level) {
+    if (!tauntBar) return;
+    const bgColor =
+      level === "easy"
+        ? PALETTE.aiEasy
+        : level === "medium"
+        ? PALETTE.aiMedium
+        : PALETTE.aiHard;
+    // Glassy, transparent look: translucent gradient + backdrop blur
+    const glassTop = "rgba(255,255,255,0.08)";
+    const glassBottom = rgbaFromHex(bgColor, 0.18);
+    tauntBar.style.background = `linear-gradient(180deg, ${glassTop}, ${glassBottom})`;
+    tauntBar.style.backdropFilter = "blur(8px) saturate(120%)";
+    tauntBar.style.webkitBackdropFilter = "blur(8px) saturate(120%)";
+    tauntBar.style.color = pickReadableTextColor(bgColor);
+    // Slightly larger left border using a darker shade of the same color
+    const darker = darkenHexToRgbString(bgColor, 0.2);
+    tauntBar.style.borderLeft = `6px solid ${darker}`;
+    // Subtle colored shadow to enhance glass depth
+    tauntBar.style.boxShadow = `inset 0 1px 0 rgba(255,255,255,0.25), 0 8px 20px ${rgbaFromHex(
+      bgColor,
+      0.22
+    )}`;
+  }
+
   // Virtual game dimensions (logical units)
   const GAME_WIDTH = 800;
   const GAME_HEIGHT = 450;
@@ -74,27 +141,36 @@
     vy: 0,
     speed: ballDefaults.speed,
   };
+  // AI thinking state for reaction-timed decisions
+  let aiBrain = {
+    targetCenterY: GAME_HEIGHT / 2,
+    nextThinkAt: 0,
+  };
+  function resetAIThinking() {
+    aiBrain.targetCenterY = GAME_HEIGHT / 2;
+    aiBrain.nextThinkAt = 0;
+  }
 
   // Difficulty-configurable parameters (defaults = medium)
   const DIFFICULTY_PRESETS = {
     easy: {
-      aiMaxSpeed: 260,
-      aiReaction: 0.15,
-      aiError: 0.25,
-      ballSpeed: 330,
-      ballMaxSpeed: 700,
+      aiMaxSpeed: 200,
+      aiReaction: 0.28,
+      aiError: 0.55,
+      ballSpeed: 320,
+      ballMaxSpeed: 680,
     },
     medium: {
-      aiMaxSpeed: 470,
-      aiReaction: 0.045,
-      aiError: 0.08,
+      aiMaxSpeed: 220,
+      aiReaction: 0.06,
+      aiError: 0.12,
       ballSpeed: 360,
       ballMaxSpeed: 850,
     },
     hard: {
-      aiMaxSpeed: 1400,
-      aiReaction: 0.0,
-      aiError: 0.0,
+      aiMaxSpeed: 240,
+      aiReaction: 0.015,
+      aiError: 0.02,
       ballSpeed: 420,
       ballMaxSpeed: 1000,
     },
@@ -541,11 +617,17 @@
   }
 
   // --- Layered feedback: Ball trail ---
-  const MAX_TRAIL_POINTS = 14;
+  const TRAIL_MAX_MS = 220; // ~13 frames at 60fps
+  const TRAIL_MAX_POINTS = 48;
   const ballTrail = [];
   function addTrailPoint() {
-    ballTrail.push({ x: ball.x, y: ball.y });
-    if (ballTrail.length > MAX_TRAIL_POINTS) ballTrail.shift();
+    const now = performance.now();
+    ballTrail.push({ x: ball.x, y: ball.y, t: now });
+    // Remove points older than time window
+    while (ballTrail.length && now - ballTrail[0].t > TRAIL_MAX_MS)
+      ballTrail.shift();
+    // Hard cap to avoid unbounded growth at very high frame rates
+    if (ballTrail.length > TRAIL_MAX_POINTS) ballTrail.shift();
   }
   function clearTrail() {
     ballTrail.length = 0;
@@ -554,9 +636,11 @@
     if (ballTrail.length === 0) return;
     ctx.save();
     const r = ballDefaults.size / 2;
+    const now = performance.now();
     for (let i = 0; i < ballTrail.length; i++) {
-      const t = i / ballTrail.length;
-      const alpha = t * 0.5; // older points are fainter
+      const age = now - ballTrail[i].t;
+      const alpha = Math.max(0, 1 - age / TRAIL_MAX_MS) * 0.6;
+      if (alpha <= 0.01) continue;
       ctx.fillStyle = `rgba(255,255,255,${alpha})`;
       ctx.beginPath();
       ctx.arc(ballTrail[i].x, ballTrail[i].y, r, 0, Math.PI * 2);
@@ -643,7 +727,7 @@
     const netWidth = 4;
     const x = GAME_WIDTH / 2 - netWidth / 2;
     for (let y = 0; y < GAME_HEIGHT; y += segmentHeight + gap) {
-      drawRect(x, y, netWidth, segmentHeight, "#6c8cff");
+      drawRect(x, y, netWidth, segmentHeight, PALETTE.net);
     }
     ctx.restore();
   }
@@ -653,7 +737,7 @@
     const [sx, sy] = getShakeOffset();
     ctx.save();
     ctx.translate(sx, sy);
-    drawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, "#0b0e22");
+    drawRect(0, 0, GAME_WIDTH, GAME_HEIGHT, PALETTE.background);
 
     drawNet();
 
@@ -661,21 +745,30 @@
     drawBallTrail();
 
     // Paddles
-    drawRect(player.x, player.y, paddle.width, paddle.height, "#73e0a9");
+    drawRect(
+      player.x,
+      player.y,
+      paddle.width,
+      paddle.height,
+      PALETTE.playerPaddle
+    );
     // AI paddle color depends on persona/difficulty
     const aiColor =
       currentDifficulty === "easy"
-        ? "#4da3ff"
+        ? PALETTE.aiEasy
         : currentDifficulty === "medium"
-        ? "#a06cff"
-        : "#ff5c6b";
+        ? PALETTE.aiMedium
+        : PALETTE.aiHard;
     drawRect(ai.x, ai.y, paddle.width, paddle.height, aiColor);
 
     // Ball (circle)
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = PALETTE.ballFill;
     ctx.beginPath();
     ctx.arc(ball.x, ball.y, ballDefaults.size / 2, 0, Math.PI * 2);
     ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = PALETTE.ballStroke;
+    ctx.stroke();
 
     // Particles (over ball)
     drawParticles();
@@ -741,6 +834,22 @@
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
   }
+  // Predict ball Y at a given X, with wall reflections
+  function reflectYAcrossWalls(rawY) {
+    const doubleHeight = GAME_HEIGHT * 2;
+    let m = rawY % doubleHeight;
+    if (m < 0) m += doubleHeight;
+    return m <= GAME_HEIGHT ? m : doubleHeight - m;
+  }
+  function predictBallYAtX(targetX) {
+    if (ball.vx <= 0) return GAME_HEIGHT / 2;
+    const margin = paddle.width / 2 + ballDefaults.size / 2;
+    const dx = targetX - ball.x - margin;
+    const t = dx / Math.max(1e-6, ball.vx);
+    if (t <= 0) return ball.y;
+    const projectedY = ball.y + ball.vy * t;
+    return reflectYAcrossWalls(projectedY);
+  }
   const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60° max deflection
   const PADDLE_SPIN = 0.16; // coupling of paddle vertical motion into ball spin/angle
 
@@ -761,16 +870,58 @@
   }
 
   function updateAI(dt) {
-    // Predictive but limited speed
-    const aiCenter = ai.y + paddle.height / 2;
-    const noise = (Math.random() - 0.5) * aiError * 200;
-    const target = ball.y + ball.vy * aiReactionDelay + noise;
-    const diff = target - aiCenter;
+    const now = performance.now();
+    const aiCenterY = ai.y + paddle.height / 2;
+
+    // Think only at reaction-timed intervals for more human-like behavior
+    if (now >= aiBrain.nextThinkAt) {
+      let desiredCenterY = GAME_HEIGHT / 2;
+      if (ball.vx > 0 || isHard) {
+        const predictedY = predictBallYAtX(ai.x);
+        const speedFactor = clamp(
+          (ball.speed - ballStartSpeed) /
+            (ballMaxSpeed - ballStartSpeed + 1e-6),
+          0,
+          1
+        );
+        // Error scales slightly with speed to allow human-like misses
+        const baseJitter = aiError * 160;
+        const speedJitter = aiError * 180 * speedFactor;
+        const noise = (Math.random() - 0.5) * (baseJitter + speedJitter);
+        desiredCenterY = clamp(
+          predictedY + noise,
+          paddle.height / 2,
+          GAME_HEIGHT - paddle.height / 2
+        );
+      }
+      aiBrain.targetCenterY = desiredCenterY;
+
+      const baseMs = Math.max(0.01, aiReactionDelay) * 1000;
+      const jitterMs = baseMs * 0.4 * (Math.random() * 2 - 1); // +/-40%
+      aiBrain.nextThinkAt = now + baseMs + jitterMs;
+    }
+
+    const diff = aiBrain.targetCenterY - aiCenterY;
     const maxStep = aiMaxSpeed * dt;
-    const step = clamp(diff, -maxStep, maxStep);
+    let step = clamp(diff, -maxStep, maxStep);
 
     // Only chase when ball moving towards AI to make it fair
-    if (isHard || ball.vx > 0 || Math.abs(diff) > paddle.height * 0.25) {
+    let allowChase =
+      isHard || ball.vx > 0 || Math.abs(diff) > paddle.height * 0.25;
+    if (!isHard) {
+      if (currentDifficulty === "easy") {
+        // Track later and hesitate sometimes
+        if (ball.x < GAME_WIDTH * 0.55) allowChase = false;
+        if (randomChance(0.5 * dt)) allowChase = false; // brief hesitation
+        step *= 0.85; // slightly lazier tracking
+      } else if (currentDifficulty === "medium") {
+        // Medium: similar paddle speed, earlier positioning and fewer hesitations
+        if (ball.x < GAME_WIDTH * 0.5) allowChase = false;
+        if (randomChance(0.1 * dt)) allowChase = false; // occasional hesitation
+        step *= 0.92;
+      }
+    }
+    if (allowChase) {
       ai.y += step;
     }
     const oldY = ai.y;
@@ -837,6 +988,7 @@
     // Next point: alternate server and start countdown
     server = scorer === "player" ? "ai" : "player";
     resetPositions();
+    resetAIThinking();
     sfxScore(scorer === "player");
     addScreenShake(6, 220);
     startCountdown(server === "player" ? 1 : -1);
@@ -1061,7 +1213,9 @@
           ? "persona-medium"
           : "persona-hard"
       );
+      setTauntBarPersonaColor(level);
     }
+    resetAIThinking();
   }
 
   // Initialize difficulty from selected radio (default medium)
@@ -1094,6 +1248,7 @@
     // Randomize initial server and begin countdown
     server = Math.random() < 0.5 ? "player" : "ai";
     resetPositions();
+    resetAIThinking();
     startBtn.textContent = "Start";
     startCountdown(server === "player" ? 1 : -1);
   }
@@ -1116,6 +1271,7 @@
     ai.score = 0;
     updateScoreUI();
     resetPositions();
+    resetAIThinking();
     ball.vx = 0;
     ball.vy = 0;
     startBtn.textContent = "Start";
