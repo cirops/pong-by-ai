@@ -185,6 +185,36 @@
   let isHard = false;
   let tauntCooldownMs = 5000; // unified base
 
+  // Adaptive difficulty: gradual parameter offsets layered on top of presets
+  let adaptive = {
+    aiMaxSpeedOffset: 0,
+    aiReactionOffset: 0,
+    aiErrorOffset: 0,
+    ballStartSpeedOffset: 0,
+    ballMaxSpeedOffset: 0,
+  };
+
+  function applyAdaptiveOffsets() {
+    const preset = DIFFICULTY_PRESETS[currentDifficulty];
+    aiMaxSpeed = clamp(preset.aiMaxSpeed + adaptive.aiMaxSpeedOffset, 160, 300);
+    aiReactionDelay = clamp(
+      preset.aiReaction + adaptive.aiReactionOffset,
+      0.01,
+      0.6
+    );
+    aiError = clamp(preset.aiError + adaptive.aiErrorOffset, 0.01, 1.0);
+    ballStartSpeed = clamp(
+      preset.ballSpeed + adaptive.ballStartSpeedOffset,
+      260,
+      520
+    );
+    ballMaxSpeed = clamp(
+      preset.ballMaxSpeed + adaptive.ballMaxSpeedOffset,
+      700,
+      1200
+    );
+  }
+
   // Taunt personas and phrases (expanded)
   const TAUNTS = {
     easy: {
@@ -975,6 +1005,25 @@
     // Match win check
     if (player.score >= POINTS_TO_WIN || ai.score >= POINTS_TO_WIN) {
       matchWinner = player.score > ai.score ? "player" : "ai";
+      // Adaptive difficulty adjustment based on margin of victory
+      try {
+        const margin = Math.abs(player.score - ai.score);
+        const playerWon = matchWinner === "player";
+        // Larger margins → stronger adjustment. Small margins → subtle.
+        // Sign: if player won, make AI tougher; if AI won, make it easier.
+        const sign = playerWon ? 1 : -1;
+        const step = margin >= 5 ? 1.0 : margin >= 3 ? 0.6 : 0.3;
+        // Apply to reaction (lower is harder), speed (higher is harder), and error (lower is harder)
+        adaptive.aiReactionOffset += -sign * 0.01 * step; // 10ms per small step
+        adaptive.aiMaxSpeedOffset += sign * 6 * step; // px/s
+        adaptive.aiErrorOffset += -sign * 0.02 * step;
+        // Keep ball speeds slightly influenced for pacing
+        adaptive.ballStartSpeedOffset += sign * 6 * step;
+        adaptive.ballMaxSpeedOffset += sign * 10 * step;
+        applyAdaptiveOffsets();
+        resetAIThinking();
+      } catch {}
+
       state = State.MATCH_OVER;
       startBtn.textContent = "Rematch";
       resetPositions();
@@ -1192,11 +1241,13 @@
   function applyDifficulty(level) {
     currentDifficulty = level;
     const preset = DIFFICULTY_PRESETS[level];
+    // Base from preset, then layer adaptive offsets
     aiMaxSpeed = preset.aiMaxSpeed;
     aiReactionDelay = preset.aiReaction;
     aiError = preset.aiError;
     ballStartSpeed = preset.ballSpeed;
     ballMaxSpeed = preset.ballMaxSpeed;
+    applyAdaptiveOffsets();
     isHard = level === "hard";
     // Unified base cooldown; difficulty no longer changes it
     tauntCooldownMs = 5000;
