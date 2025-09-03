@@ -368,10 +368,31 @@
   };
 
   function serveBall(direction = Math.random() < 0.5 ? -1 : 1) {
-    ball.x = GAME_WIDTH / 2;
-    ball.y = GAME_HEIGHT / 2;
-    const angle = (Math.random() * 0.6 - 0.3) * Math.PI; // [-54°, 54°]
+    // Spawn the ball on the server's half and ensure it travels away from the server
+    const servingSide = direction === 1 ? "player" : "ai"; // +1 means player serves to the right
+    const spawnY = GAME_HEIGHT / 2;
+
+    if (servingSide === "player") {
+      ball.x = player.x + paddle.width + ballDefaults.size;
+    } else {
+      ball.x = ai.x - ballDefaults.size;
+    }
+    ball.y = spawnY;
+
     ball.speed = ballStartSpeed;
+
+    // Fault prevention: constrain serve angle so the ball cannot hit top/bottom
+    // before crossing the center line. Compute the maximum allowable slope so
+    // that |vy/vx| does not exceed (vertical room) / (distance to mid).
+    const distanceToCenter = Math.max(1, Math.abs(GAME_WIDTH / 2 - ball.x));
+    const verticalMargin = ballDefaults.size * 1.5;
+    const maxRise = Math.max(1, GAME_HEIGHT / 2 - verticalMargin);
+    const maxSlope = Math.min(3, maxRise / distanceToCenter);
+    const maxAngle = Math.atan(maxSlope); // radians
+
+    // Random angle within [-maxAngle, +maxAngle]
+    const angle = (Math.random() * 2 - 1) * maxAngle;
+
     ball.vx = Math.cos(angle) * ball.speed * direction;
     ball.vy = Math.sin(angle) * ball.speed;
   }
