@@ -380,8 +380,26 @@
     MENU: "menu",
     PLAYING: "playing",
     PAUSED: "paused",
+    COUNTDOWN: "countdown",
+    MATCH_OVER: "match_over",
   };
   let state = State.MENU;
+
+  // Match configuration and state
+  const POINTS_TO_WIN = 7;
+  let server = "player"; // alternates each point; set at match start
+  let matchWinner = null; // "player" | "ai" | null
+
+  // Countdown state
+  let countdownEndAt = 0; // performance.now() timestamp when countdown ends
+  let nextServeDirection = 1; // +1 means ball goes to AI (right), -1 goes to player (left)
+
+  // Simple stats
+  let currentRallyHits = 0;
+  let longestRally = 0;
+  let totalRallies = 0;
+  let playerAces = 0;
+  let aiAces = 0;
 
   // Rendering helpers
   function drawRect(x, y, w, h, color) {
@@ -425,20 +443,57 @@
     ctx.arc(ball.x, ball.y, ballDefaults.size / 2, 0, Math.PI * 2);
     ctx.fill();
 
-    // If not playing, overlay hint
+    // If not playing, overlay UI for menu/pause/countdown/match over
     if (state !== State.PLAYING) {
       ctx.save();
       ctx.fillStyle = "rgba(0,0,0,0.35)";
       ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
       ctx.fillStyle = "rgba(233,236,255,0.95)";
-      ctx.font =
-        "24px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
       ctx.textAlign = "center";
-      ctx.fillText(
-        state === State.MENU ? "Press Start to Play" : "Paused",
-        GAME_WIDTH / 2,
-        GAME_HEIGHT / 2
-      );
+
+      const centerX = GAME_WIDTH / 2;
+      const centerY = GAME_HEIGHT / 2;
+
+      if (state === State.MENU) {
+        ctx.font =
+          "24px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
+        ctx.fillText("Press Start to Play", centerX, centerY);
+      } else if (state === State.PAUSED) {
+        ctx.font =
+          "24px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
+        ctx.fillText("Paused", centerX, centerY);
+      } else if (state === State.COUNTDOWN) {
+        const remainingMs = Math.max(0, countdownEndAt - performance.now());
+        const seconds = Math.ceil(remainingMs / 1000);
+        ctx.font =
+          "64px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
+        ctx.fillText(String(Math.max(1, seconds)), centerX, centerY);
+        ctx.font =
+          "18px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
+        const servingWho =
+          nextServeDirection === 1 ? "Player serves" : "AI serves";
+        ctx.fillText(servingWho, centerX, centerY + 36);
+      } else if (state === State.MATCH_OVER) {
+        const winnerText = matchWinner === "player" ? "You Win!" : "AI Wins!";
+        ctx.font =
+          "36px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
+        ctx.fillText(winnerText, centerX, centerY - 40);
+
+        ctx.font =
+          "16px system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Helvetica, Arial";
+        const lines = [
+          `Final Score: ${player.score} : ${ai.score}`,
+          `Longest rally: ${longestRally}`,
+          `Aces — You: ${playerAces}  AI: ${aiAces}`,
+          `Rallies: ${totalRallies}`,
+          `Press Start for Rematch or Reset to return to Menu`,
+        ];
+        let y = centerY;
+        for (const line of lines) {
+          ctx.fillText(line, centerX, y);
+          y += 22;
+        }
+      }
       ctx.restore();
     }
   }
@@ -487,6 +542,16 @@
   function onScore(scorer) {
     if (scorer === "player") player.score += 1;
     if (scorer === "ai") ai.score += 1;
+
+    // Stats update
+    longestRally = Math.max(longestRally, currentRallyHits);
+    if (currentRallyHits === 0) {
+      if (scorer === "player") playerAces += 1;
+      else aiAces += 1;
+    }
+    totalRallies += 1;
+    currentRallyHits = 0;
+
     // Taunts on scoring events (higher chance on Easy for fun, lower on Hard)
     if (scorer === "ai") {
       maybeTaunt(
@@ -509,9 +574,24 @@
         { bypassCooldown: true }
       );
     }
+
     updateScoreUI();
+
+    // Match win check
+    if (player.score >= POINTS_TO_WIN || ai.score >= POINTS_TO_WIN) {
+      matchWinner = player.score > ai.score ? "player" : "ai";
+      state = State.MATCH_OVER;
+      startBtn.textContent = "Rematch";
+      resetPositions();
+      ball.vx = 0;
+      ball.vy = 0;
+      return;
+    }
+
+    // Next point: alternate server and start countdown
+    server = scorer === "player" ? "ai" : "player";
     resetPositions();
-    serveBall(scorer === "player" ? -1 : 1);
+    startCountdown(server === "player" ? 1 : -1);
   }
 
   function updateScoreUI() {
@@ -547,6 +627,7 @@
       top <= player.y + paddle.height &&
       ball.vx < 0
     ) {
+      currentRallyHits += 1;
       const hitPos =
         (ball.y - (player.y + paddle.height / 2)) / (paddle.height / 2);
       const angle = hitPos * (Math.PI / 3); // up to 60°
@@ -584,6 +665,7 @@
       top <= ai.y + paddle.height &&
       ball.vx > 0
     ) {
+      currentRallyHits += 1;
       const hitPos =
         (ball.y - (ai.y + paddle.height / 2)) / (paddle.height / 2);
       const angle = hitPos * (Math.PI / 3);
@@ -627,7 +709,12 @@
     const dt = Math.min(0.033, (ts - lastTime) / 1000);
     lastTime = ts;
 
-    if (state === State.PLAYING) {
+    if (state === State.COUNTDOWN) {
+      if (performance.now() >= countdownEndAt) {
+        serveBall(nextServeDirection);
+        setState(State.PLAYING);
+      }
+    } else if (state === State.PLAYING) {
       updatePlayer(dt);
       updateAI(dt);
       updateBall(dt);
@@ -694,8 +781,36 @@
     });
   });
 
+  function startCountdown(direction) {
+    nextServeDirection = direction;
+    countdownEndAt = performance.now() + 3000; // 3 seconds
+    state = State.COUNTDOWN;
+  }
+
+  function startMatch() {
+    // Reset scores and stats
+    player.score = 0;
+    ai.score = 0;
+    updateScoreUI();
+    longestRally = 0;
+    totalRallies = 0;
+    playerAces = 0;
+    aiAces = 0;
+    currentRallyHits = 0;
+    matchWinner = null;
+    // Randomize initial server and begin countdown
+    server = Math.random() < 0.5 ? "player" : "ai";
+    resetPositions();
+    startBtn.textContent = "Start";
+    startCountdown(server === "player" ? 1 : -1);
+  }
+
   startBtn.addEventListener("click", () => {
-    setState(State.PLAYING);
+    if (state === State.MENU || state === State.MATCH_OVER) {
+      startMatch();
+    } else if (state === State.PAUSED) {
+      setState(State.PLAYING);
+    }
   });
 
   pauseBtn.addEventListener("click", () => {
@@ -709,6 +824,7 @@
     resetPositions();
     ball.vx = 0;
     ball.vy = 0;
+    startBtn.textContent = "Start";
     setState(State.MENU);
   });
 
@@ -721,8 +837,10 @@
       if (e.key === "ArrowUp" || e.key.toLowerCase() === "w") input.up = true;
       if (e.key === "ArrowDown" || e.key.toLowerCase() === "s")
         input.down = true;
-      if (e.key === " " && (state === State.MENU || state === State.PAUSED))
-        setState(State.PLAYING);
+      if (e.key === " ") {
+        if (state === State.MENU || state === State.MATCH_OVER) startMatch();
+        else if (state === State.PAUSED) setState(State.PLAYING);
+      }
     },
     { passive: false }
   );
